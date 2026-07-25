@@ -1,4 +1,5 @@
-import { serve } from '@hono/node-server';
+import { serve, serveStatic } from '@hono/node-server';
+import { existsSync } from 'node:fs';
 import { Hono } from 'hono';
 import { randomUUID } from 'node:crypto';
 import { createClient } from '@openauthjs/openauth/client';
@@ -298,4 +299,11 @@ app.post('/api/reset', async (c) => {
   return json(c, { reset: true });
 });
 
-serve({ fetch: app.fetch, port: Number(process.env.API_PORT ?? 8787), hostname: process.env.API_HOST ?? '127.0.0.1' }, (info) => console.info(`Retain API listening on http://${info.address}:${info.port}`));
+if (existsSync('./dist')) {
+  app.use('/*', serveStatic({ root: './dist' }));
+}
+
+const port = Number(process.env.PORT ?? process.env.API_PORT ?? 3000);
+const hostname = process.env.HOST ?? process.env.API_HOST ?? '0.0.0.0';
+
+serve({ fetch: app.fetch, port, hostname }, (info) => console.info(`Retain server listening on http://${info.address}:${info.port}`));

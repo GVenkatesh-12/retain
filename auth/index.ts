@@ -69,6 +69,9 @@ const authApp = issuer({
   },
 });
 
-serve({ fetch: authApp.fetch, port: Number(process.env.AUTH_PORT ?? 3001), hostname: process.env.AUTH_HOST ?? '127.0.0.1' }, (info) => {
+const authPort = Number(process.env.AUTH_PORT ?? 3001);
+const authHost = process.env.AUTH_HOST ?? process.env.HOST ?? '0.0.0.0';
+
+serve({ fetch: authApp.fetch, port: authPort, hostname: authHost }, (info) => {
   console.info(`Retain email/password auth listening on http://${info.address}:${info.port}`);
 });
