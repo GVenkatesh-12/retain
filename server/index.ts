@@ -9,7 +9,7 @@ import { dashboardSummary, estimateBonusCount, isMaintenanceTopic, rankBonusTopi
 import { execute, migrate, query, transaction } from './db.js';
 import type { AppData, BonusBatch, CompletionEvent, Revision, Settings, Topic } from '../src/types.js';
 
-const app = new Hono<{ Variables: { retainUserId: string } }>();
+export const app = new Hono<{ Variables: { retainUserId: string } }>();
 const installationUser = process.env.RETAIN_USER_ID ?? 'local-user';
 const authClient = process.env.OPENAUTH_ISSUER ? createClient({ clientID: 'retain-api', issuer: process.env.OPENAUTH_ISSUER }) : null;
 const nowIso = () => new Date().toISOString();
