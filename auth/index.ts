@@ -11,7 +11,7 @@ const resendApiKey = process.env.RESEND_API_KEY;
 const resend = resendApiKey && resendApiKey !== 're_xxxxxxxxx' ? new Resend(resendApiKey) : null;
 const fromEmail = process.env.RESEND_FROM_EMAIL ?? 'onboarding@resend.dev';
 
-const authApp = issuer({
+export const authApp = issuer({
   subjects,
   // File-backed storage keeps local development sessions across restarts. Use a durable
   // OpenAuth storage adapter before deploying multiple auth instances.

@@ -1,4 +1,5 @@
-import { serve, serveStatic } from '@hono/node-server';
+import { serve } from '@hono/node-server';
+import { serveStatic } from '@hono/node-server/serve-static';
 import { existsSync } from 'node:fs';
 import { Hono } from 'hono';
 import { randomUUID } from 'node:crypto';
