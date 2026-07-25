@@ -360,8 +360,55 @@ function LoginScreen({ onLogin }: { onLogin: () => Promise<void> }) {
   return <div className="auth-screen"><div className="auth-card"><div className="brand auth-brand"><span className="brand-mark">r</span><span>retain</span></div><span className="eyebrow">Private study space</span><h1>Keep your progress close.</h1><p>Sign in with your email and password to continue to your revision plan.</p><Button variant="primary" onClick={login} disabled={busy}>{busy ? 'Opening secure login…' : 'Continue with email & password'} <Icon name="arrow" /></Button>{error && <p className="auth-error" role="alert">{error}</p>}<small>Authentication is handled securely by OpenAuth.</small></div></div>;
 }
 
+function PasscodeScreen({ onUnlock }: { onUnlock: (passcode: string) => Promise<boolean> }) {
+  const [passcode, setPasscode] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!passcode.trim() || busy) return;
+    setBusy(true);
+    setError('');
+    const ok = await onUnlock(passcode.trim());
+    setBusy(false);
+    if (!ok) setError('Incorrect passcode. Please try again.');
+  };
+  return <div className="auth-screen"><div className="auth-card"><div className="brand auth-brand"><span className="brand-mark">r</span><span>retain</span></div><span className="eyebrow">Private study space</span><h1>Enter Passcode</h1><p>This Retain deployment is passcode protected.</p><form onSubmit={submit}><input type="password" value={passcode} onChange={(e) => setPasscode(e.target.value)} placeholder="Type your passcode" autoFocus /><div style={{ marginTop: 16 }}><Button variant="primary" type="submit" disabled={busy || !passcode}>{busy ? 'Unlocking…' : 'Unlock Retain'}</Button></div></form>{error && <p className="auth-error" role="alert">{error}</p>}</div></div>;
+}
+
 export default function App() {
+  const [passcodeState, setPasscodeState] = useState<'checking' | 'required' | 'granted'>('checking');
   const [authState, setAuthState] = useState<'loading' | 'authenticated' | 'unauthenticated'>(authEnabled ? 'loading' : 'authenticated');
+
+  const checkPasscode = async () => {
+    try {
+      const res = await apiRequest('/api/verify-passcode');
+      if (res.ok) {
+        const body = await res.json() as { data?: { required: boolean; valid: boolean } };
+        if (!body.data?.required || body.data?.valid) {
+          setPasscodeState('granted');
+          return true;
+        }
+      }
+      setPasscodeState('required');
+      return false;
+    } catch {
+      setPasscodeState('granted');
+      return true;
+    }
+  };
+
+  const handleUnlock = async (code: string) => {
+    sessionStorage.setItem('retain-app-passcode', code);
+    const valid = await checkPasscode();
+    if (valid) void store.hydrateFromApi();
+    return valid;
+  };
+
+  useEffect(() => {
+    void checkPasscode();
+  }, []);
+
   useEffect(() => {
     if (!authEnabled) return;
     let cancelled = false;
@@ -372,6 +419,9 @@ export default function App() {
     })();
     return () => { cancelled = true; };
   }, []);
+
+  if (passcodeState === 'checking') return <div className="auth-screen"><div className="auth-loading">Loading Retain…</div></div>;
+  if (passcodeState === 'required') return <PasscodeScreen onUnlock={handleUnlock} />;
   if (!authEnabled) return <RetainApp />;
   if (authState === 'loading') return <div className="auth-screen"><div className="auth-loading">Checking your secure session…</div></div>;
   if (authState === 'unauthenticated') return <LoginScreen onLogin={beginLogin} />;

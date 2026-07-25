@@ -56,7 +56,19 @@ app.use('*', async (_c, next) => { await migrate(); await next(); });
 
 app.get('/api/health', async (c) => { await query('SELECT 1 AS ok'); return json(c, { status: 'ok', database: 'connected' }); });
 
+app.get('/api/verify-passcode', (c) => {
+  const secret = process.env.RETAIN_PASSWORD;
+  if (!secret) return json(c, { required: false, valid: true });
+  const provided = getHeader(c, 'x-retain-passcode');
+  return json(c, { required: true, valid: provided === secret });
+});
+
 app.use('/api/*', async (c, next) => {
+  const secret = process.env.RETAIN_PASSWORD;
+  if (secret) {
+    const provided = getHeader(c, 'x-retain-passcode');
+    if (provided !== secret) return fail(c, 'unauthorized', 'Passcode required.', 401);
+  }
   if (!authClient) return next();
   const header = c.req.header('authorization');
   const token = header?.startsWith('Bearer ') ? header.slice(7) : '';

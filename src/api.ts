@@ -16,5 +16,7 @@ export async function apiRequest(path: string, init: RequestInit = {}): Promise<
   headers.set('content-type', 'application/json');
   const token = accessToken();
   if (token) headers.set('authorization', `Bearer ${token}`);
+  const passcode = sessionStorage.getItem('retain-app-passcode');
+  if (passcode) headers.set('x-retain-passcode', passcode);
   return fetch(path, { ...init, headers });
 }
