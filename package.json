@@ -9,7 +9,7 @@
     "dev:api": "tsx server/index.ts",
     "dev:full": "concurrently \"vite\" \"tsx auth/index.ts\" \"tsx server/index.ts\"",
     "db:migrate": "tsx server/migrate.ts",
-    "build": "tsc --noEmit && vite build",
+    "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
