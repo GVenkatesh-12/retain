@@ -382,16 +382,19 @@ export default function App() {
 
   const checkPasscode = async () => {
     try {
-      const res = await apiRequest('/api/verify-passcode');
+      const storedCode = sessionStorage.getItem('retain-app-passcode') || '';
+      const res = await fetch('/api/verify-passcode', {
+        headers: { 'x-retain-passcode': storedCode }
+      });
       if (res.ok) {
         const body = await res.json() as { data?: { required: boolean; valid: boolean } };
-        if (!body.data?.required || body.data?.valid) {
-          setPasscodeState('granted');
-          return true;
+        if (body.data?.required && !body.data?.valid) {
+          setPasscodeState('required');
+          return false;
         }
       }
-      setPasscodeState('required');
-      return false;
+      setPasscodeState('granted');
+      return true;
     } catch {
       setPasscodeState('granted');
       return true;
