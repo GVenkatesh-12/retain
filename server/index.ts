@@ -14,6 +14,7 @@ import type { AppData, BonusBatch, CompletionEvent, Revision, Settings, Topic } 
 
 export const app = new Hono<{ Variables: { retainUserId: string } }>();
 app.route('/auth', authApp);
+app.route('/password', authApp);
 
 const installationUser = process.env.RETAIN_USER_ID ?? 'local-user';
 const issuerUrl = process.env.OPENAUTH_ISSUER || (process.env.RENDER_EXTERNAL_URL ? `${process.env.RENDER_EXTERNAL_URL}/auth` : null);
@@ -306,6 +307,7 @@ app.post('/api/reset', async (c) => {
 
 if (existsSync('./dist')) {
   app.use('/*', serveStatic({ root: './dist' }));
+  app.get('*', serveStatic({ path: './dist/index.html' }));
 }
 
 const port = Number(process.env.PORT ?? process.env.API_PORT ?? 3000);
