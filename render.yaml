@@ -14,3 +14,11 @@ services:
         sync: false
       - key: RETAIN_PASSWORD
         sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: RESEND_FROM_EMAIL
+        sync: false
+      - key: OPENAUTH_ISSUER
+        sync: false
+      - key: VITE_OPENAUTH_ISSUER
+        sync: false

@@ -8,11 +8,15 @@ import { addDaysToDateKey, dateKeyToInstant, isValidTimezone, localDateKey } fro
 import { calculateStatistics } from '../src/domain/metrics.js';
 import { dashboardSummary, estimateBonusCount, isMaintenanceTopic, rankBonusTopics, scheduleForTopic } from '../src/domain/schedule.js';
 import { execute, migrate, query, transaction } from './db.js';
+import { authApp } from '../auth/index.js';
 import type { AppData, BonusBatch, CompletionEvent, Revision, Settings, Topic } from '../src/types.js';
 
 export const app = new Hono<{ Variables: { retainUserId: string } }>();
+app.route('/auth', authApp);
+
 const installationUser = process.env.RETAIN_USER_ID ?? 'local-user';
-const authClient = process.env.OPENAUTH_ISSUER ? createClient({ clientID: 'retain-api', issuer: process.env.OPENAUTH_ISSUER }) : null;
+const issuerUrl = process.env.OPENAUTH_ISSUER || (process.env.RENDER_EXTERNAL_URL ? `${process.env.RENDER_EXTERNAL_URL}/auth` : null);
+const authClient = issuerUrl ? createClient({ clientID: 'retain-api', issuer: issuerUrl }) : null;
 const nowIso = () => new Date().toISOString();
 const json = (c: any, data: unknown, status = 200) => c.json({ data }, status);
 const fail = (c: any, code: string, message: string, status = 400, fields?: Record<string, string>) => c.json({ error: { code, message, requestId: randomUUID(), ...(fields ? { fields } : {}) } }, status);
