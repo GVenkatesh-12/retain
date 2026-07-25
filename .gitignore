@@ -1,0 +1,58 @@
+# Dependencies & Package Managers
+node_modules/
+.pnpm-store/
+
+# Build Outputs & Cache
+dist/
+build/
+*.tsbuildinfo
+.vite/
+vite.config.js
+vite.config.d.ts
+
+# Environment Files & Secrets (Security Critical)
+.env
+.env.*
+!.env.example
+*.env
+*.env.local
+
+# Database & Storage (Local SQLite / Turso)
+retain.db
+*.db
+*.sqlite
+*.sqlite3
+*.db-shm
+*.db-wal
+.retain-auth.json
+
+# Keys, Certificates & Credentials
+*.pem
+*.key
+*.crt
+*.pfx
+*.p12
+id_rsa*
+.secret*
+
+# IDE, OS & System Metadata
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs & Temporary Files
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+tmp/
+temp/
+*.tmp
+
+# AI Agent & Workspace Scratch Directory
+.gemini/
+.antigravity/
