@@ -8,7 +8,7 @@ const client = issuer ? createClient({ clientID: 'retain-web', issuer }) : null;
 const subjects = createSubjects({ user: object({ id: string(), email: string() }) });
 const TOKEN_KEY = 'retain-auth-tokens';
 const USER_KEY = 'retain-user-session';
-const CALLBACK_PATH = '/auth/callback';
+const CALLBACK_PATH = '/callback';
 
 export interface UserSession {
   id: string;
