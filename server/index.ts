@@ -14,7 +14,14 @@ import type { AppData, BonusBatch, CompletionEvent, Revision, Settings, Topic } 
 
 export const app = new Hono<{ Variables: { retainUserId: string } }>();
 app.route('/auth', authApp);
-app.route('/password', authApp);
+// OpenAuth constructs internal redirects to provider paths (e.g. /password/authorize)
+// without the /auth mount prefix. Redirect these to the correct /auth-prefixed path
+// so they reach the password provider UI handler instead of the main authorize endpoint.
+app.all('/password/*', (c) => {
+  const url = new URL(c.req.url);
+  url.pathname = '/auth' + url.pathname;
+  return c.redirect(url.toString(), 307);
+});
 
 const installationUser = process.env.RETAIN_USER_ID ?? 'local-user';
 const issuerUrl = process.env.OPENAUTH_ISSUER || (process.env.RENDER_EXTERNAL_URL ? `${process.env.RENDER_EXTERNAL_URL}/auth` : null);
