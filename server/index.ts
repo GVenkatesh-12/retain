@@ -306,8 +306,23 @@ app.post('/api/reset', async (c) => {
 });
 
 if (existsSync('./dist')) {
-  app.use('/*', serveStatic({ root: './dist' }));
-  app.get('*', serveStatic({ path: './dist/index.html' }));
+  // Serve static assets from dist, but skip API, auth, and password routes
+  app.use('/*', async (c, next) => {
+    const path = new URL(c.req.url).pathname;
+    if (path.startsWith('/api/') || path.startsWith('/auth') || path.startsWith('/password')) {
+      return next();
+    }
+    const response = await serveStatic({ root: './dist' })(c, next);
+    return response;
+  });
+  // SPA fallback: serve index.html for any non-API/auth GET request that didn't match a static file
+  app.get('*', async (c, next) => {
+    const path = new URL(c.req.url).pathname;
+    if (path.startsWith('/api/') || path.startsWith('/auth') || path.startsWith('/password')) {
+      return next();
+    }
+    return serveStatic({ path: './dist/index.html' })(c, next);
+  });
 }
 
 const port = Number(process.env.PORT ?? process.env.API_PORT ?? 3000);
