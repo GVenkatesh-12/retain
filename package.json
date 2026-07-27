@@ -5,13 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "dev:auth": "tsx auth/index.ts",
     "dev:api": "tsx server/index.ts",
-    "dev:full": "concurrently \"vite\" \"tsx auth/index.ts\" \"tsx server/index.ts\"",
+    "dev:full": "concurrently \"vite\" \"tsx server/index.ts\"",
     "db:migrate": "tsx server/migrate.ts",
-    "start": "npx tsx server/index.ts",
-    "start:with-auth": "concurrently \"npx tsx auth/index.ts\" \"npx tsx server/index.ts\"",
-    "build": "vite build",
+    "build": "tsc -b && vite build",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -21,16 +18,14 @@
   "dependencies": {
     "@hono/node-server": "^2.0.11",
     "@libsql/client": "^0.17.4",
-    "@openauthjs/openauth": "^0.4.3",
-    "@vitejs/plugin-react": "^4.3.4",
+    "@vitejs/plugin-react": "latest",
     "hono": "^4.12.0",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
+    "react": "latest",
+    "react-dom": "latest",
     "resend": "^6.18.0",
-    "typescript": "^5.7.3",
-    "tsx": "^4.23.1",
+    "typescript": "latest",
     "valibot": "^1.4.2",
-    "vite": "^6.0.7"
+    "vite": "latest"
   },
   "devDependencies": {
     "@types/node": "^26.1.1",
@@ -38,6 +33,7 @@
     "@types/react-dom": "latest",
     "concurrently": "^10.0.4",
     "jsdom": "latest",
+    "tsx": "^4.23.1",
     "vitest": "latest"
   }
 }

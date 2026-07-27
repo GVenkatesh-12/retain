@@ -1,31 +1,14 @@
 import { serve } from '@hono/node-server';
-import { serveStatic } from '@hono/node-server/serve-static';
-import { existsSync } from 'node:fs';
 import { Hono } from 'hono';
-import { randomUUID } from 'node:crypto';
-import { createClient } from '@openauthjs/openauth/client';
-import { subjects } from '../auth/subjects.js';
+import { pbkdf2Sync, randomUUID } from 'node:crypto';
 import { addDaysToDateKey, dateKeyToInstant, isValidTimezone, localDateKey } from '../src/domain/date.js';
 import { calculateStatistics } from '../src/domain/metrics.js';
 import { dashboardSummary, estimateBonusCount, isMaintenanceTopic, rankBonusTopics, scheduleForTopic } from '../src/domain/schedule.js';
 import { execute, migrate, query, transaction } from './db.js';
-import { authApp } from '../auth/index.js';
 import type { AppData, BonusBatch, CompletionEvent, Revision, Settings, Topic } from '../src/types.js';
 
-export const app = new Hono<{ Variables: { retainUserId: string } }>();
-app.route('/auth', authApp);
-// OpenAuth constructs internal redirects to provider paths (e.g. /password/authorize)
-// without the /auth mount prefix. Redirect these to the correct /auth-prefixed path
-// so they reach the password provider UI handler instead of the main authorize endpoint.
-app.all('/password/*', (c) => {
-  const url = new URL(c.req.url);
-  url.pathname = '/auth' + url.pathname;
-  return c.redirect(url.toString(), 307);
-});
-
-const installationUser = process.env.RETAIN_USER_ID ?? 'local-user';
-const issuerUrl = process.env.OPENAUTH_ISSUER || (process.env.RENDER_EXTERNAL_URL ? `${process.env.RENDER_EXTERNAL_URL}/auth` : null);
-const authClient = issuerUrl ? createClient({ clientID: 'retain-api', issuer: issuerUrl }) : null;
+const app = new Hono<{ Variables: { retainUserId: string } }>();
+const installationUser = process.env.RETAIN_USER_ID ?? 'user-gvenkatesh';
 const nowIso = () => new Date().toISOString();
 const json = (c: any, data: unknown, status = 200) => c.json({ data }, status);
 const fail = (c: any, code: string, message: string, status = 400, fields?: Record<string, string>) => c.json({ error: { code, message, requestId: randomUUID(), ...(fields ? { fields } : {}) } }, status);
@@ -70,26 +53,39 @@ app.use('*', async (_c, next) => { await migrate(); await next(); });
 
 app.get('/api/health', async (c) => { await query('SELECT 1 AS ok'); return json(c, { status: 'ok', database: 'connected' }); });
 
-app.get('/api/verify-passcode', (c) => {
-  const secret = process.env.RETAIN_PASSWORD;
-  if (!secret) return json(c, { required: false, valid: true });
-  const provided = getHeader(c, 'x-retain-passcode');
-  return json(c, { required: true, valid: provided === secret });
+app.post('/api/auth/login', async (c) => {
+  const body = await c.req.json().catch(() => null) as Record<string, unknown> | null;
+  const email = stringValue(body?.email).toLowerCase();
+  const password = stringValue(body?.password);
+
+  if (!email || !password) {
+    return fail(c, 'invalid_credentials', 'Email and password are required.', 400);
+  }
+
+  const rows = await query('SELECT * FROM users WHERE email = :email', { email });
+  const user = rows[0];
+  if (!user) {
+    return fail(c, 'invalid_credentials', 'Invalid email or password.', 401);
+  }
+
+  const salt = rowString(user, 'password_salt');
+  const expectedHash = rowString(user, 'password_hash');
+  const computedHash = pbkdf2Sync(password, salt, 100000, 32, 'sha256').toString('hex');
+
+  if (computedHash !== expectedHash) {
+    return fail(c, 'invalid_credentials', 'Invalid email or password.', 401);
+  }
+
+  const uid = rowString(user, 'id');
+  return json(c, {
+    user: { id: uid, email: rowString(user, 'email') },
+    token: `retain-session-${uid}-${Date.now()}`,
+  });
 });
 
 app.use('/api/*', async (c, next) => {
-  const secret = process.env.RETAIN_PASSWORD;
-  if (secret) {
-    const provided = getHeader(c, 'x-retain-passcode');
-    if (provided !== secret) return fail(c, 'unauthorized', 'Passcode required.', 401);
-  }
-  if (!authClient) return next();
-  const header = c.req.header('authorization');
-  const token = header?.startsWith('Bearer ') ? header.slice(7) : '';
-  if (!token) return fail(c, 'unauthorized', 'Sign in to access Retain.', 401);
-  const verified = await authClient.verify(subjects, token);
-  if (verified.err) return fail(c, 'unauthorized', 'Your session has expired. Sign in again.', 401);
-  c.set('retainUserId', verified.subject.properties.id);
+  if (c.req.path === '/api/auth/login' || c.req.path === '/api/health') return next();
+  c.set('retainUserId', installationUser);
   return next();
 });
 
@@ -312,27 +308,4 @@ app.post('/api/reset', async (c) => {
   return json(c, { reset: true });
 });
 
-if (existsSync('./dist')) {
-  // Serve static assets from dist, but skip API, auth, and password routes
-  app.use('/*', async (c, next) => {
-    const path = new URL(c.req.url).pathname;
-    if (path.startsWith('/api/') || path.startsWith('/auth') || path.startsWith('/password')) {
-      return next();
-    }
-    const response = await serveStatic({ root: './dist' })(c, next);
-    return response;
-  });
-  // SPA fallback: serve index.html for any non-API/auth GET request that didn't match a static file
-  app.get('*', async (c, next) => {
-    const path = new URL(c.req.url).pathname;
-    if (path.startsWith('/api/') || path.startsWith('/auth') || path.startsWith('/password')) {
-      return next();
-    }
-    return serveStatic({ path: './dist/index.html' })(c, next);
-  });
-}
-
-const port = Number(process.env.PORT ?? process.env.API_PORT ?? 3000);
-const hostname = process.env.HOST ?? process.env.API_HOST ?? '0.0.0.0';
-
-serve({ fetch: app.fetch, port, hostname }, (info) => console.info(`Retain server listening on http://${info.address}:${info.port}`));
+serve({ fetch: app.fetch, port: Number(process.env.API_PORT ?? 8787), hostname: process.env.API_HOST ?? '127.0.0.1' }, (info) => console.info(`Retain API listening on http://${info.address}:${info.port}`));

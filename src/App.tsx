@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { authEnabled, beginLogin, checkAuth, finishLogin, getUserSession, logout } from './auth';
+import { authEnabled, checkAuth, getUserSession, loginWithPassword, logout } from './auth';
 import { calculateStatistics } from './domain/metrics';
 import { addDaysToDateKey, formatDate, isValidTimezone, localDateKey } from './domain/date';
 import { dashboardSummary, isMaintenanceTopic } from './domain/schedule';
@@ -13,9 +13,10 @@ function useData() {
   return useSyncExternalStore(store.subscribe, () => store.data, () => store.data);
 }
 
-function Icon({ name }: { name: 'sun' | 'chart' | 'search' | 'gear' | 'plus' | 'check' | 'arrow' | 'download' | 'upload' | 'book' | 'user' | 'logout' | 'calendar' | 'edit' | 'trash' }) {
+function Icon({ name }: { name: 'sun' | 'moon' | 'chart' | 'search' | 'gear' | 'plus' | 'check' | 'arrow' | 'download' | 'upload' | 'book' | 'user' | 'logout' | 'calendar' | 'edit' | 'trash' }) {
   const paths: Record<string, string> = {
     sun: 'M12 3v2m0 14v2M3 12h2m14 0h2M5.6 5.6l1.4 1.4m10 10 1.4 1.4m0-12.8-1.4 1.4m-10 10-1.4 1.4M16.5 12a4.5 4.5 0 1 1-9 0 4.5 4.5 0 0 1 9 0Z',
+    moon: 'M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z',
     chart: 'M4 19V5m0 14h16M8 16v-4m4 4V8m4 8V4', search: 'm20 20-4.4-4.4m2.4-5.1a7.5 7.5 0 1 1-15 0 7.5 7.5 0 0 1 15 0Z', gear: 'M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Zm7.2-3.2a7.3 7.3 0 0 0-.1-1.1l1.7-1.3-1.6-2.7-2 .8a7.3 7.3 0 0 0-1.9-1.1L15 4.5h-3.1l-.4 2.1a7.3 7.3 0 0 0-1.9 1.1l-2-.8L6 9.6l1.7 1.3a7.3 7.3 0 0 0 0 2.2L6 14.4l1.6 2.7 2-.8a7.3 7.3 0 0 0 1.9 1.1l.4 2.1H15l.4-2.1a7.3 7.3 0 0 0 1.9-1.1l2 .8 1.6-2.7-1.7-1.3c.1-.4.1-.7.1-1.1Z', plus: 'M12 5v14M5 12h14', check: 'm5 12 4 4L19 6', arrow: 'M5 12h14m-6-6 6 6-6 6', download: 'M12 3v12m0 0 4-4m-4 4-4-4M5 21h14', upload: 'M12 15V3m0 0 4 4m-4-4L8 7M5 21h14', book: 'M4 5.5A2.5 2.5 0 0 1 6.5 3H20v16H6.5A2.5 2.5 0 0 0 4 21V5.5Zm0 0A2.5 2.5 0 0 1 6.5 8H20',
     user: 'M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z',
     logout: 'M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4m7 14 5-5-5-5m5 5H9',
@@ -34,10 +35,17 @@ function Button({ children, variant = 'secondary', onClick, type = 'button', dis
 function ProgressRing({ value, completed, total }: { value: number; completed: number; total: number }) {
   const radius = 62;
   const circumference = 2 * Math.PI * radius;
+  const pct = Math.round(value * 100);
   return <div className="progress-wrap"><svg className="progress-ring" viewBox="0 0 148 148" role="img" aria-label={`${completed} of ${total} mandatory revisions complete`}>
+    <defs>
+      <linearGradient id="progress-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stopColor="var(--accent)" />
+        <stop offset="100%" stopColor="var(--accent-dark)" />
+      </linearGradient>
+    </defs>
     <circle className="progress-track" cx="74" cy="74" r={radius} />
-    <circle className="progress-value" cx="74" cy="74" r={radius} strokeDasharray={circumference} strokeDashoffset={circumference * (1 - value)} />
-  </svg><div className="progress-center"><strong>{completed}</strong><span>of {total || 0}</span></div></div>;
+    <circle className="progress-value" cx="74" cy="74" r={radius} stroke="url(#progress-grad)" strokeDasharray={circumference} strokeDashoffset={circumference * (1 - value)} />
+  </svg><div className="progress-center"><strong>{completed}</strong><span>of {total || 0} ({pct}%)</span></div></div>;
 }
 
 function RevisionRow({ revision, topic, timezone, onComplete }: { revision: Revision; topic?: Topic; timezone: string; onComplete: (id: string) => void }) {
@@ -88,6 +96,23 @@ function CustomDateInput({ valueKey, onChangeKey }: { valueKey: string; onChange
     if (e.target.value) onChangeKey(e.target.value);
   };
 
+  const openPicker = (e?: React.MouseEvent | React.FocusEvent) => {
+    if (e) e.stopPropagation();
+    if (nativeRef.current) {
+      try {
+        if (typeof nativeRef.current.showPicker === 'function') {
+          nativeRef.current.showPicker();
+        } else {
+          nativeRef.current.focus();
+          nativeRef.current.click();
+        }
+      } catch (err) {
+        nativeRef.current.focus();
+        nativeRef.current.click();
+      }
+    }
+  };
+
   return (
     <div className="custom-date-input-wrap">
       <input
@@ -97,12 +122,13 @@ function CustomDateInput({ valueKey, onChangeKey }: { valueKey: string; onChange
         placeholder="DD/MM/YY"
         maxLength={10}
       />
-      <div className="calendar-trigger-container">
+      <div className="calendar-trigger-container" onClick={openPicker}>
         <button
           type="button"
           className="calendar-trigger"
           title="Open calendar picker"
           aria-label="Open calendar picker"
+          onClick={openPicker}
         >
           <Icon name="calendar" />
         </button>
@@ -111,6 +137,7 @@ function CustomDateInput({ valueKey, onChangeKey }: { valueKey: string; onChange
           type="date"
           value={valueKey}
           onChange={handleNativeChange}
+          onClick={openPicker}
           className="overlay-native-date"
           tabIndex={-1}
         />
@@ -127,7 +154,17 @@ function AddStudyDialog({ onClose }: { onClose: () => void }) {
   const [title, setTitle] = useState('');
   const [startDate, setStartDate] = useState(() => localDateKey(new Date(), data.settings.timezone));
   const [saved, setSaved] = useState(false);
+  const focusRef = useRef<HTMLInputElement | HTMLSelectElement>(null);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      focusRef.current?.focus();
+    }, 60);
+    return () => clearTimeout(timer);
+  }, [subjectChoice]);
+
   const valid = subject.trim().length > 0 && subject.trim().length <= 120 && title.trim().length > 0 && title.trim().length <= 240;
+
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     if (!valid) return;
@@ -135,9 +172,18 @@ function AddStudyDialog({ onClose }: { onClose: () => void }) {
     setSaved(true);
     setTimeout(onClose, 350);
   }
+
+  const handleTitleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setTitle(e.target.value);
+  };
+
+  const handleSubjectChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setSubject(e.target.value);
+  };
+
   return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="modal" role="dialog" aria-modal="true" aria-labelledby="add-study-title">
     <div className="modal-heading"><div><span className="eyebrow">New study</span><h2 id="add-study-title">Keep something worth remembering</h2></div><button className="close-button" onClick={onClose} aria-label="Close dialog">×</button></div>
-    <form onSubmit={submit}><label>Subject<select autoFocus value={subjectChoice} onChange={(event) => { const value = event.target.value; setSubjectChoice(value); setSubject(value === newSubjectValue ? '' : value); }} aria-label="Choose a saved subject"><option value={newSubjectValue}>＋ Create a new subject</option>{data.subjects.map((savedSubject) => <option key={savedSubject} value={savedSubject}>{savedSubject}</option>)}</select></label>{subjectChoice === newSubjectValue && <label>New subject<input autoFocus value={subject} onChange={(event) => setSubject(event.target.value)} placeholder="e.g. Biology, Spanish, Product design" maxLength={120} /></label>}<label>Title<input autoFocus={subjectChoice !== newSubjectValue} value={title} onChange={(event) => setTitle(event.target.value)} placeholder="What do you want to retain?" maxLength={240} /></label><label>Start date (DD/MM/YY)<CustomDateInput valueKey={startDate} onChangeKey={setStartDate} /></label><p className="form-hint">Saved subjects are kept for quick selection. Six quiet check-ins will appear on days 3, 5, 7, 12, 20, and 30 relative to your start date.</p><div className="modal-actions"><Button variant="quiet" onClick={onClose}>Cancel</Button><Button variant="primary" type="submit" disabled={!valid}>{saved ? 'Saved' : 'Add study'} <Icon name="arrow" /></Button></div></form>
+    <form onSubmit={submit}><label>Subject<select ref={subjectChoice !== newSubjectValue ? (focusRef as any) : undefined} value={subjectChoice} onChange={(event) => { const value = event.target.value; setSubjectChoice(value); setSubject(value === newSubjectValue ? '' : value); }} aria-label="Choose a saved subject"><option value={newSubjectValue}>＋ Create a new subject</option>{data.subjects.map((savedSubject) => <option key={savedSubject} value={savedSubject}>{savedSubject}</option>)}</select></label>{subjectChoice === newSubjectValue && <label>New subject<input ref={focusRef as any} value={subject} onChange={handleSubjectChange} placeholder="e.g. Biology, Spanish, Product design" maxLength={120} /></label>}<label>Title<input ref={subjectChoice !== newSubjectValue ? (focusRef as any) : undefined} value={title} onChange={handleTitleChange} placeholder="What do you want to retain?" maxLength={240} /></label><label>Start date (DD/MM/YY)<CustomDateInput valueKey={startDate} onChangeKey={setStartDate} /></label><p className="form-hint">Saved subjects are kept for quick selection. Six quiet check-ins will appear on days 3, 5, 7, 12, 20, and 30 relative to your start date.</p><div className="modal-actions"><Button variant="quiet" onClick={onClose}>Cancel</Button><Button variant="primary" type="submit" disabled={!valid}>{saved ? 'Saved' : 'Add study'} <Icon name="arrow" /></Button></div></form>
   </div></div>;
 }
 
@@ -145,9 +191,21 @@ function EditStudyDialog({ topic, onClose }: { topic: Topic; onClose: () => void
   const data = useData();
   const [subject, setSubject] = useState(topic.subject);
   const [title, setTitle] = useState(topic.title);
-  const [startDate, setStartDate] = useState(() => localDateKey(new Date(topic.createdAt), data.settings.timezone));
+  const getInitialDate = (created: string) => {
+    if (!created) return localDateKey(new Date(), data.settings.timezone);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(created)) return created;
+    const d = new Date(created);
+    return !isNaN(d.getTime()) ? localDateKey(d, data.settings.timezone) : localDateKey(new Date(), data.settings.timezone);
+  };
+  const [startDate, setStartDate] = useState(() => getInitialDate(topic.createdAt));
   const [saved, setSaved] = useState(false);
   const valid = subject.trim().length > 0 && subject.trim().length <= 120 && title.trim().length > 0 && title.trim().length <= 240;
+
+  useEffect(() => {
+    setSubject(topic.subject);
+    setTitle(topic.title);
+    setStartDate(getInitialDate(topic.createdAt));
+  }, [topic.id, topic.subject, topic.title, topic.createdAt, data.settings.timezone]);
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -262,6 +320,18 @@ function Dashboard({ onAdd, onEditTopic }: { onAdd: () => void; onEditTopic: (to
   const data = useData();
   const summary = dashboardSummary(data);
   const topicMap = useMemo(() => new Map(data.topics.map((topic) => [topic.id, topic])), [data.topics]);
+  const [queueFilter, setQueueFilter] = useState<'all' | 'due' | 'overdue'>('all');
+
+  const filteredRevisions = useMemo(() => {
+    if (queueFilter === 'due') {
+      return summary.due.filter((r) => localDateKey(new Date(r.dueAt), data.settings.timezone) === summary.date);
+    }
+    if (queueFilter === 'overdue') {
+      return summary.due.filter((r) => localDateKey(new Date(r.dueAt), data.settings.timezone) < summary.date);
+    }
+    return summary.due;
+  }, [summary.due, summary.date, data.settings.timezone, queueFilter]);
+
   const upcomingNextDay = useMemo(() => {
     const tomorrowKey = addDaysToDateKey(summary.date, 1);
     const pending = data.revisions.filter((revision) => revision.kind === 'mandatory' && revision.status === 'pending');
@@ -275,16 +345,34 @@ function Dashboard({ onAdd, onEditTopic }: { onAdd: () => void; onEditTopic: (to
     const nextDateRevisions = futureRevisions.filter((revision) => localDateKey(new Date(revision.dueAt), data.settings.timezone) === nextUpcomingDateKey);
     return { dateKey: nextUpcomingDateKey, revisions: nextDateRevisions, isTomorrow: nextUpcomingDateKey === tomorrowKey };
   }, [data.revisions, data.settings.timezone, summary.date]);
+
   const [toast, setToast] = useState('');
   const complete = async (id: string) => { if (await store.completeRevision(id)) { setToast('Revision completed. Nice work.'); setTimeout(() => setToast(''), 2400); } };
   const dateLabel = formatDate(summary.date, { weekday: 'long', month: 'long', day: 'numeric' });
   const activeBatch = data.bonusBatches.some((batch) => !batch.endedAt && batch.revisionIds.some((id) => data.revisions.find((revision) => revision.id === id)?.status === 'pending'));
+
+  const dueTodayCount = summary.due.filter((r) => localDateKey(new Date(r.dueAt), data.settings.timezone) === summary.date).length;
+  const overdueCount = summary.due.filter((r) => localDateKey(new Date(r.dueAt), data.settings.timezone) < summary.date).length;
+
   return <>
     <header className="page-header"><div><span className="eyebrow">{dateLabel}</span><h1>Good to see you.</h1><p className="subtitle">A little progress, kept simple.</p></div><Button variant="primary" onClick={onAdd}><Icon name="plus" /> Add study <span className="shortcut">N</span></Button></header>
     {data.topics.length === 0 ? <EmptyState onAdd={onAdd} /> : <>
       <section className="overview-grid"><div className="progress-card"><div><span className="eyebrow">Today’s mandatory work</span><h2>{summary.remaining ? `${summary.remaining} to go` : summary.dueCount ? 'All clear for today' : 'Your plan is ready'}</h2><p>{summary.dueCount ? `${summary.completedDueCount} of ${summary.dueCount} due revisions complete.` : 'Your next check-in will appear here when it is due.'}</p><div className="stat-pair"><span><strong>{summary.completedToday}</strong> completed today</span><span><strong>{summary.dueCount}</strong> due total</span></div></div><ProgressRing value={summary.progress} completed={summary.completedDueCount} total={summary.dueCount} /></div><div className="insight-card"><span className="eyebrow">Daily target</span><div className="insight-number">{summary.completedToday}<span> / {data.settings.dailyTarget}</span></div><p>{summary.bonusCapacity > 0 ? `${summary.bonusCapacity} spaces left for optional maintenance.` : 'Mandatory work takes priority today.'}</p><div className="mini-line"><span style={{ width: `${Math.min(summary.completedToday / data.settings.dailyTarget * 100, 100)}%` }} /></div></div></section>
       <section className="section-heading"><div><span className="eyebrow">Your queue</span><h2>Mandatory revisions</h2></div><span className="quiet-count">{summary.remaining} remaining</span></section>
-      {summary.due.length ? <div className="revision-list">{summary.due.map((revision) => <RevisionRow key={revision.id} revision={revision} timezone={data.settings.timezone} topic={topicMap.get(revision.topicId)} onComplete={complete} />)}</div> : <div className="done-card"><div className="done-icon"><Icon name="check" /></div><div><h2>{summary.dueCount ? 'Great job. All mandatory revisions are complete.' : 'Nothing due just yet.'}</h2><p>{summary.dueCount ? 'You’ve made space for what comes next.' : 'New check-ins will appear here automatically.'}</p></div></div>}
+      {summary.due.length > 0 && (
+        <div className="queue-filter-pills">
+          <button className={`filter-pill ${queueFilter === 'all' ? 'active' : ''}`} onClick={() => setQueueFilter('all')}>
+            All ({summary.due.length})
+          </button>
+          <button className={`filter-pill ${queueFilter === 'due' ? 'active' : ''}`} onClick={() => setQueueFilter('due')}>
+            Due Today ({dueTodayCount})
+          </button>
+          <button className={`filter-pill ${queueFilter === 'overdue' ? 'active' : ''}`} onClick={() => setQueueFilter('overdue')}>
+            Overdue ({overdueCount})
+          </button>
+        </div>
+      )}
+      {filteredRevisions.length ? <div className="revision-list">{filteredRevisions.map((revision) => <RevisionRow key={revision.id} revision={revision} timezone={data.settings.timezone} topic={topicMap.get(revision.topicId)} onComplete={complete} />)}</div> : <div className="done-card"><div className="done-icon"><Icon name="check" /></div><div><h2>{summary.dueCount ? 'Great job. All mandatory revisions in this filter are complete.' : 'Nothing due just yet.'}</h2><p>{summary.dueCount ? 'You’ve made space for what comes next.' : 'New check-ins will appear here automatically.'}</p></div></div>}
       {upcomingNextDay.revisions.length > 0 && <section className="upcoming-section"><div className="section-heading"><div><span className="eyebrow">{upcomingNextDay.isTomorrow ? 'Next Day' : 'Coming Up'} · {formatDate(upcomingNextDay.dateKey)}</span><h2>{upcomingNextDay.isTomorrow ? 'Revisions due tomorrow' : `Revisions for ${formatDate(upcomingNextDay.dateKey)}`}</h2></div><span className="quiet-count">{upcomingNextDay.revisions.length} scheduled</span></div><div className="upcoming-list">{upcomingNextDay.revisions.map((revision) => <UpcomingRevisionRow key={revision.id} revision={revision} timezone={data.settings.timezone} topic={topicMap.get(revision.topicId)} />)}</div></section>}
       {!activeBatch && <BonusPrompt onCreated={() => setToast('Optional maintenance batch ready.')} />}{activeBatch && <ActiveBonus onComplete={complete} />}
       <section className="recent-section"><div className="section-heading"><div><span className="eyebrow">A small record</span><h2>Recent completions</h2></div></div>{data.completionEvents.length ? <div className="recent-list">{[...data.completionEvents].reverse().slice(0, 4).map((event) => <div className="recent-item" key={event.id}><span className="recent-dot" /><div><strong>{topicMap.get(event.topicId)?.title ?? 'Study'}</strong><span>{event.kind === 'bonus' ? 'Optional maintenance' : 'Mandatory revision'} · {formatDate(event.localDate)}</span></div></div>)}</div> : <p className="muted">Your first completion will show up here.</p>}</section>
@@ -345,88 +433,87 @@ function RetainApp() {
   const [editingTopic, setEditingTopic] = useState<Topic | null>(null);
   useEffect(() => { void store.hydrateFromApi(); }, []);
   useEffect(() => { document.documentElement.dataset.theme = data.settings.theme === 'system' ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : data.settings.theme; document.documentElement.dataset.motion = data.settings.animationsEnabled ? 'on' : 'off'; }, [data.settings.theme, data.settings.animationsEnabled]);
-  useEffect(() => { const handler = (event: KeyboardEvent) => { if ((event.target as HTMLElement).matches('input, textarea, select')) return; if (event.key.toLowerCase() === 'n') setAddOpen(true); if (event.key === '/') { event.preventDefault(); setPage('search'); } if (event.key === 'Escape') { setAddOpen(false); setEditingTopic(null); } }; window.addEventListener('keydown', handler); return () => window.removeEventListener('keydown', handler); }, []);
-  return <div className="app-shell"><a href="#main" className="skip-link">Skip to content</a><nav className="topbar"><button className="brand" onClick={() => setPage('dashboard')} aria-label="Go to Today"><span className="brand-mark">r</span><span>retain</span></button><div className="nav-links">{([['dashboard', 'Today', 'sun'], ['statistics', 'Statistics', 'chart'], ['search', 'Search', 'search'], ['settings', 'Settings', 'gear']] as const).map(([key, label, icon]) => <button key={key} className={page === key ? 'active' : ''} onClick={() => setPage(key)} aria-label={label}><Icon name={icon} />{label}</button>)}</div>{authEnabled && <div className="user-profile-badge" title={user?.email || 'Signed in'}><span className="user-avatar"><Icon name="user" /></span><span className="user-email">{user?.email || 'Account'}</span><button className="logout-button" onClick={logout} title="Sign out" aria-label="Sign out"><Icon name="logout" /></button></div>}<button className="mobile-add" onClick={() => setAddOpen(true)} aria-label="Add study"><Icon name="plus" /></button></nav><main id="main" className="main-content">{page === 'dashboard' && <Dashboard onAdd={() => setAddOpen(true)} onEditTopic={(topic) => setEditingTopic(topic)} />}{page === 'statistics' && <StatisticsPage />}{page === 'search' && <SearchPage onEditTopic={(topic) => setEditingTopic(topic)} />}{page === 'settings' && <SettingsPage />}</main>{addOpen && <AddStudyDialog onClose={() => setAddOpen(false)} />}{editingTopic && <EditStudyDialog topic={editingTopic} onClose={() => setEditingTopic(null)} />}<footer className="footer">Retain <span>·</span> quiet progress, remembered <small>v1.0</small></footer></div>;
+  useEffect(() => { const handler = (event: KeyboardEvent) => { if ((event.target as HTMLElement).matches('input, textarea, select')) return; if (event.key.toLowerCase() === 'n') { event.preventDefault(); setAddOpen(true); } if (event.key === '/') { event.preventDefault(); setPage('search'); } if (event.key === 'Escape') { setAddOpen(false); setEditingTopic(null); } }; window.addEventListener('keydown', handler); return () => window.removeEventListener('keydown', handler); }, []);
+  return <div className="app-shell"><a href="#main" className="skip-link">Skip to content</a><nav className="topbar"><button className="brand" onClick={() => setPage('dashboard')} aria-label="Go to Today"><span className="brand-mark">r</span><span>retain</span></button><div className="nav-links">{([['dashboard', 'Today', 'sun'], ['statistics', 'Statistics', 'chart'], ['search', 'Search', 'search'], ['settings', 'Settings', 'gear']] as const).map(([key, label, icon]) => <button key={key} className={page === key ? 'active' : ''} onClick={() => setPage(key)} aria-label={label}><Icon name={icon} />{label}</button>)}</div>{authEnabled && <div className="user-profile-badge" title={user?.email || 'Signed in'}><span className="user-avatar"><Icon name="user" /></span><span className="user-email">{user?.email || 'Account'}</span><button className="logout-button" onClick={logout} title="Sign out" aria-label="Sign out"><Icon name="logout" /></button></div>}<button className="theme-toggle-btn" onClick={() => { const nextTheme = data.settings.theme === 'dark' ? 'light' : 'dark'; void store.updateSettings({ theme: nextTheme }); }} title={`Switch to ${data.settings.theme === 'dark' ? 'light' : 'dark'} mode`} aria-label="Toggle theme"><Icon name={data.settings.theme === 'dark' ? 'sun' : 'moon'} /></button><button className="mobile-add" onClick={() => setAddOpen(true)} aria-label="Add study"><Icon name="plus" /></button></nav><main id="main" className="main-content">{page === 'dashboard' && <Dashboard onAdd={() => setAddOpen(true)} onEditTopic={(topic) => setEditingTopic(topic)} />}{page === 'statistics' && <StatisticsPage />}{page === 'search' && <SearchPage onEditTopic={(topic) => setEditingTopic(topic)} />}{page === 'settings' && <SettingsPage />}</main>{addOpen && <AddStudyDialog onClose={() => setAddOpen(false)} />}{editingTopic && <EditStudyDialog topic={editingTopic} onClose={() => setEditingTopic(null)} />}<footer className="footer">Retain <span>·</span> quiet progress, remembered <small>v1.0</small></footer></div>;
 }
 
-function LoginScreen({ onLogin }: { onLogin: () => Promise<void> }) {
+function LoginScreen({ onAuthenticated }: { onAuthenticated: () => void }) {
+  const [email, setEmail] = useState('gvenkatesh.on@gmail.com');
+  const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const login = async () => {
-    setBusy(true);
-    setError('');
-    try { await onLogin(); } catch { setError('Unable to start email/password login. Check the OpenAuth server and try again.'); setBusy(false); }
-  };
-  return <div className="auth-screen"><div className="auth-card"><div className="brand auth-brand"><span className="brand-mark">r</span><span>retain</span></div><span className="eyebrow">Private study space</span><h1>Keep your progress close.</h1><p>Sign in with your email and password to continue to your revision plan.</p><Button variant="primary" onClick={login} disabled={busy}>{busy ? 'Opening secure login…' : 'Continue with email & password'} <Icon name="arrow" /></Button>{error && <p className="auth-error" role="alert">{error}</p>}<small>Authentication is handled securely by OpenAuth.</small></div></div>;
-}
 
-function PasscodeScreen({ onUnlock }: { onUnlock: (passcode: string) => Promise<boolean> }) {
-  const [passcode, setPasscode] = useState('');
-  const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!passcode.trim() || busy) return;
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
     setBusy(true);
     setError('');
-    const ok = await onUnlock(passcode.trim());
+    const res = await loginWithPassword(email, password);
     setBusy(false);
-    if (!ok) setError('Incorrect passcode. Please try again.');
-  };
-  return <div className="auth-screen"><div className="auth-card"><div className="brand auth-brand"><span className="brand-mark">r</span><span>retain</span></div><span className="eyebrow">Private study space</span><h1>Enter Passcode</h1><p>This Retain deployment is passcode protected.</p><form onSubmit={submit}><input type="password" value={passcode} onChange={(e) => setPasscode(e.target.value)} placeholder="Type your passcode" autoFocus /><div style={{ marginTop: 16 }}><Button variant="primary" type="submit" disabled={busy || !passcode}>{busy ? 'Unlocking…' : 'Unlock Retain'}</Button></div></form>{error && <p className="auth-error" role="alert">{error}</p>}</div></div>;
-}
-
-export default function App() {
-  const [passcodeState, setPasscodeState] = useState<'checking' | 'required' | 'granted'>('checking');
-  const [authState, setAuthState] = useState<'loading' | 'authenticated' | 'unauthenticated'>(authEnabled ? 'loading' : 'authenticated');
-
-  const checkPasscode = async () => {
-    try {
-      const storedCode = sessionStorage.getItem('retain-app-passcode') || '';
-      const res = await fetch('/api/verify-passcode', {
-        headers: { 'x-retain-passcode': storedCode }
-      });
-      if (res.ok) {
-        const body = await res.json() as { data?: { required: boolean; valid: boolean } };
-        if (body.data?.required && !body.data?.valid) {
-          setPasscodeState('required');
-          return false;
-        }
-      }
-      setPasscodeState('granted');
-      return true;
-    } catch {
-      setPasscodeState('granted');
-      return true;
+    if (res.ok) {
+      onAuthenticated();
+    } else {
+      setError(res.message || 'Invalid email or password.');
     }
   };
 
-  const handleUnlock = async (code: string) => {
-    sessionStorage.setItem('retain-app-passcode', code);
-    const valid = await checkPasscode();
-    if (valid) void store.hydrateFromApi();
-    return valid;
-  };
+  return (
+    <div className="auth-screen">
+      <div className="auth-card">
+        <div className="brand auth-brand">
+          <span className="brand-mark">r</span>
+          <span>retain</span>
+        </div>
+        <span className="eyebrow">Private study space</span>
+        <h1>Keep your progress close.</h1>
+        <p>Sign in with your email and password to continue to your revision plan.</p>
+        <form onSubmit={handleSubmit} className="auth-form">
+          <label>
+            Email address
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="gvenkatesh.on@gmail.com"
+              required
+              autoFocus
+            />
+          </label>
+          <label>
+            Password
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Enter your password"
+              required
+            />
+          </label>
+          {error && <p className="auth-error" role="alert">{error}</p>}
+          <Button variant="primary" type="submit" disabled={busy}>
+            {busy ? 'Signing in…' : 'Sign in'} <Icon name="arrow" />
+          </Button>
+        </form>
+        <small>Private local authentication</small>
+      </div>
+    </div>
+  );
+}
 
-  useEffect(() => {
-    void checkPasscode();
-  }, []);
+export default function App() {
+  const [authState, setAuthState] = useState<'loading' | 'authenticated' | 'unauthenticated'>(authEnabled ? 'loading' : 'authenticated');
 
   useEffect(() => {
     if (!authEnabled) return;
     let cancelled = false;
     void (async () => {
-      await finishLogin();
       const valid = await checkAuth();
       if (!cancelled) setAuthState(valid ? 'authenticated' : 'unauthenticated');
     })();
     return () => { cancelled = true; };
   }, []);
 
-  if (passcodeState === 'checking') return <div className="auth-screen"><div className="auth-loading">Loading Retain…</div></div>;
-  if (passcodeState === 'required') return <PasscodeScreen onUnlock={handleUnlock} />;
   if (!authEnabled) return <RetainApp />;
   if (authState === 'loading') return <div className="auth-screen"><div className="auth-loading">Checking your secure session…</div></div>;
-  if (authState === 'unauthenticated') return <LoginScreen onLogin={beginLogin} />;
+  if (authState === 'unauthenticated') return <LoginScreen onAuthenticated={() => setAuthState('authenticated')} />;
   return <RetainApp />;
 }
