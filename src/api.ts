@@ -4,8 +4,7 @@ export const apiEnabled = apiMode;
 
 function accessToken(): string | null {
   try {
-    const raw = sessionStorage.getItem('retain-auth-tokens');
-    return raw ? (JSON.parse(raw) as { access?: string }).access ?? null : null;
+    return localStorage.getItem('retain-auth-token') || sessionStorage.getItem('retain-auth-token');
   } catch {
     return null;
   }

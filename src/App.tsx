@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { authEnabled, beginLogin, checkAuth, finishLogin, getUserSession, logout } from './auth';
+import { authEnabled, checkAuth, getUserSession, loginWithPassword, logout } from './auth';
 import { calculateStatistics } from './domain/metrics';
 import { addDaysToDateKey, formatDate, isValidTimezone, localDateKey } from './domain/date';
 import { dashboardSummary, isMaintenanceTopic } from './domain/schedule';
@@ -349,31 +349,83 @@ function RetainApp() {
   return <div className="app-shell"><a href="#main" className="skip-link">Skip to content</a><nav className="topbar"><button className="brand" onClick={() => setPage('dashboard')} aria-label="Go to Today"><span className="brand-mark">r</span><span>retain</span></button><div className="nav-links">{([['dashboard', 'Today', 'sun'], ['statistics', 'Statistics', 'chart'], ['search', 'Search', 'search'], ['settings', 'Settings', 'gear']] as const).map(([key, label, icon]) => <button key={key} className={page === key ? 'active' : ''} onClick={() => setPage(key)} aria-label={label}><Icon name={icon} />{label}</button>)}</div>{authEnabled && <div className="user-profile-badge" title={user?.email || 'Signed in'}><span className="user-avatar"><Icon name="user" /></span><span className="user-email">{user?.email || 'Account'}</span><button className="logout-button" onClick={logout} title="Sign out" aria-label="Sign out"><Icon name="logout" /></button></div>}<button className="mobile-add" onClick={() => setAddOpen(true)} aria-label="Add study"><Icon name="plus" /></button></nav><main id="main" className="main-content">{page === 'dashboard' && <Dashboard onAdd={() => setAddOpen(true)} onEditTopic={(topic) => setEditingTopic(topic)} />}{page === 'statistics' && <StatisticsPage />}{page === 'search' && <SearchPage onEditTopic={(topic) => setEditingTopic(topic)} />}{page === 'settings' && <SettingsPage />}</main>{addOpen && <AddStudyDialog onClose={() => setAddOpen(false)} />}{editingTopic && <EditStudyDialog topic={editingTopic} onClose={() => setEditingTopic(null)} />}<footer className="footer">Retain <span>·</span> quiet progress, remembered <small>v1.0</small></footer></div>;
 }
 
-function LoginScreen({ onLogin }: { onLogin: () => Promise<void> }) {
+function LoginScreen({ onAuthenticated }: { onAuthenticated: () => void }) {
+  const [email, setEmail] = useState('gvenkatesh.on@gmail.com');
+  const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const login = async () => {
+
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
     setBusy(true);
     setError('');
-    try { await onLogin(); } catch { setError('Unable to start email/password login. Check the OpenAuth server and try again.'); setBusy(false); }
+    const res = await loginWithPassword(email, password);
+    setBusy(false);
+    if (res.ok) {
+      onAuthenticated();
+    } else {
+      setError(res.message || 'Invalid email or password.');
+    }
   };
-  return <div className="auth-screen"><div className="auth-card"><div className="brand auth-brand"><span className="brand-mark">r</span><span>retain</span></div><span className="eyebrow">Private study space</span><h1>Keep your progress close.</h1><p>Sign in with your email and password to continue to your revision plan.</p><Button variant="primary" onClick={login} disabled={busy}>{busy ? 'Opening secure login…' : 'Continue with email & password'} <Icon name="arrow" /></Button>{error && <p className="auth-error" role="alert">{error}</p>}<small>Authentication is handled securely by OpenAuth.</small></div></div>;
+
+  return (
+    <div className="auth-screen">
+      <div className="auth-card">
+        <div className="brand auth-brand">
+          <span className="brand-mark">r</span>
+          <span>retain</span>
+        </div>
+        <span className="eyebrow">Private study space</span>
+        <h1>Keep your progress close.</h1>
+        <p>Sign in with your email and password to continue to your revision plan.</p>
+        <form onSubmit={handleSubmit} className="auth-form">
+          <label>
+            Email address
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="gvenkatesh.on@gmail.com"
+              required
+              autoFocus
+            />
+          </label>
+          <label>
+            Password
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Enter your password"
+              required
+            />
+          </label>
+          {error && <p className="auth-error" role="alert">{error}</p>}
+          <Button variant="primary" type="submit" disabled={busy}>
+            {busy ? 'Signing in…' : 'Sign in'} <Icon name="arrow" />
+          </Button>
+        </form>
+        <small>Private local authentication</small>
+      </div>
+    </div>
+  );
 }
 
 export default function App() {
   const [authState, setAuthState] = useState<'loading' | 'authenticated' | 'unauthenticated'>(authEnabled ? 'loading' : 'authenticated');
+
   useEffect(() => {
     if (!authEnabled) return;
     let cancelled = false;
     void (async () => {
-      await finishLogin();
       const valid = await checkAuth();
       if (!cancelled) setAuthState(valid ? 'authenticated' : 'unauthenticated');
     })();
     return () => { cancelled = true; };
   }, []);
+
   if (!authEnabled) return <RetainApp />;
   if (authState === 'loading') return <div className="auth-screen"><div className="auth-loading">Checking your secure session…</div></div>;
-  if (authState === 'unauthenticated') return <LoginScreen onLogin={beginLogin} />;
+  if (authState === 'unauthenticated') return <LoginScreen onAuthenticated={() => setAuthState('authenticated')} />;
   return <RetainApp />;
 }

@@ -12,6 +12,18 @@ export async function migrate(): Promise<void> {
   for (const sql of statements) {
     await db.execute(sql);
   }
+  // Seed default user if not already present
+  await db.execute({
+    sql: `INSERT OR IGNORE INTO users (id, email, password_hash, password_salt, created_at)
+          VALUES (:id, :email, :password_hash, :password_salt, :created_at)`,
+    args: {
+      id: 'user-gvenkatesh',
+      email: 'gvenkatesh.on@gmail.com',
+      password_hash: '2a52bd126fed1aacf12d39236c4d669ab114b2f3690fdd217897d61ca133b448',
+      password_salt: 'retain_salt_gvenkatesh',
+      created_at: new Date().toISOString(),
+    },
+  });
 }
 
 export type DbRow = Row & Record<string, unknown>;

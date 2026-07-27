@@ -1,14 +1,9 @@
-import { createClient, type Tokens } from '@openauthjs/openauth/client';
-import { object, string } from 'valibot';
-import { createSubjects } from '@openauthjs/openauth/subject';
+import { DEFAULT_HASH, DEFAULT_SALT, DEFAULT_USER_EMAIL, verifyPassword } from './crypto';
 
-const issuer = import.meta.env.VITE_OPENAUTH_ISSUER as string | undefined;
-export const authEnabled = Boolean(issuer);
-const client = issuer ? createClient({ clientID: 'retain-web', issuer }) : null;
-const subjects = createSubjects({ user: object({ id: string(), email: string() }) });
-const TOKEN_KEY = 'retain-auth-tokens';
 const USER_KEY = 'retain-user-session';
-const CALLBACK_PATH = '/auth/callback';
+const TOKEN_KEY = 'retain-auth-token';
+
+export const authEnabled = true;
 
 export interface UserSession {
   id: string;
@@ -18,76 +13,67 @@ export interface UserSession {
 export function getUserSession(): UserSession | null {
   try {
     const raw = localStorage.getItem(USER_KEY) || sessionStorage.getItem(USER_KEY);
-    return raw ? JSON.parse(raw) as UserSession : null;
+    return raw ? (JSON.parse(raw) as UserSession) : null;
   } catch {
     return null;
   }
 }
 
-function readTokens(): Tokens | null {
-  try {
-    const raw = localStorage.getItem(TOKEN_KEY) || sessionStorage.getItem(TOKEN_KEY);
-    return raw ? JSON.parse(raw) as Tokens : null;
-  } catch {
-    return null;
+export async function loginWithPassword(
+  email: string,
+  passwordAttempt: string
+): Promise<{ ok: boolean; message?: string }> {
+  const normalizedEmail = email.trim().toLowerCase();
+  if (normalizedEmail !== DEFAULT_USER_EMAIL.toLowerCase()) {
+    return { ok: false, message: 'Invalid email address.' };
   }
-}
 
-function saveTokens(tokens: Tokens) {
-  localStorage.setItem(TOKEN_KEY, JSON.stringify(tokens));
-  sessionStorage.removeItem(TOKEN_KEY);
-}
+  // If server mode is active, try server auth endpoint first
+  const apiMode = (import.meta.env.VITE_API_MODE as string | undefined) === 'server';
+  if (apiMode) {
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email: normalizedEmail, password: passwordAttempt }),
+      });
+      if (res.ok) {
+        const body = (await res.json()) as { data: { user: UserSession; token: string } };
+        localStorage.setItem(USER_KEY, JSON.stringify(body.data.user));
+        localStorage.setItem(TOKEN_KEY, body.data.token);
+        return { ok: true };
+      } else {
+        const body = (await res.json()) as { error?: { message?: string } };
+        return { ok: false, message: body.error?.message || 'Invalid email or password.' };
+      }
+    } catch {
+      // Fallback to local crypto verification if offline
+    }
+  }
 
-export async function beginLogin() {
-  if (!client) return;
-  const redirectUri = `${window.location.origin}${CALLBACK_PATH}`;
-  const result = await client.authorize(redirectUri, 'code', { provider: 'password', pkce: true });
-  localStorage.setItem('retain-auth-challenge', JSON.stringify(result.challenge));
-  sessionStorage.setItem('retain-auth-challenge', JSON.stringify(result.challenge));
-  window.location.assign(result.url);
-}
+  const isValid = await verifyPassword(passwordAttempt, DEFAULT_SALT, DEFAULT_HASH);
+  if (!isValid) {
+    return { ok: false, message: 'Incorrect password. Please check your credentials.' };
+  }
 
-export async function finishLogin(): Promise<boolean> {
-  if (!client) return false;
-  const params = new URLSearchParams(window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.search.slice(1));
-  const code = params.get('code');
-  if (!code) return false;
-  const challenge = localStorage.getItem('retain-auth-challenge') || sessionStorage.getItem('retain-auth-challenge');
-  const redirectUri = `${window.location.origin}${CALLBACK_PATH}`;
-  const result = await client.exchange(code, redirectUri, challenge ? JSON.parse(challenge).verifier : undefined);
-  if (result.err) return false;
-  saveTokens(result.tokens);
-  localStorage.removeItem('retain-auth-challenge');
-  sessionStorage.removeItem('retain-auth-challenge');
-  window.history.replaceState({}, document.title, '/');
-  return true;
+  const session: UserSession = {
+    id: 'user-gvenkatesh',
+    email: DEFAULT_USER_EMAIL,
+  };
+  localStorage.setItem(USER_KEY, JSON.stringify(session));
+  localStorage.setItem(TOKEN_KEY, `local-token-${Date.now()}`);
+  return { ok: true };
 }
 
 export async function checkAuth(): Promise<boolean> {
-  if (!client) return true;
-  const tokens = readTokens();
-  if (!tokens) return false;
-  const verified = await client.verify(subjects, tokens.access, { refresh: tokens.refresh });
-  if (verified.err) {
-    localStorage.removeItem(TOKEN_KEY);
-    localStorage.removeItem(USER_KEY);
-    sessionStorage.removeItem(TOKEN_KEY);
-    sessionStorage.removeItem(USER_KEY);
-    return false;
-  }
-  if (verified.tokens) saveTokens(verified.tokens);
-  if (verified.subject?.properties) {
-    localStorage.setItem(USER_KEY, JSON.stringify(verified.subject.properties));
-  }
-  return true;
+  const session = getUserSession();
+  return Boolean(session);
 }
 
 export function logout() {
-  localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(USER_KEY);
-  localStorage.removeItem('retain-auth-challenge');
-  sessionStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(TOKEN_KEY);
   sessionStorage.removeItem(USER_KEY);
-  sessionStorage.removeItem('retain-auth-challenge');
+  sessionStorage.removeItem(TOKEN_KEY);
   window.location.reload();
 }
