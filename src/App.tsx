@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { authEnabled, checkAuth, getUserSession, loginWithPassword, logout } from './auth';
+import { subscribeToSyncStatus } from './api';
 import { calculateStatistics } from './domain/metrics';
 import { addDaysToDateKey, formatDate, isValidTimezone, localDateKey } from './domain/date';
 import { dashboardSummary, isMaintenanceTopic } from './domain/schedule';
@@ -11,6 +12,58 @@ type Page = 'dashboard' | 'statistics' | 'search' | 'settings';
 
 function useData() {
   return useSyncExternalStore(store.subscribe, () => store.data, () => store.data);
+}
+
+function Spinner({ size = 15 }: { size?: number }) {
+  return (
+    <svg
+      className="icon spinner"
+      style={{ width: size, height: size }}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+    </svg>
+  );
+}
+
+function TopbarSyncIndicator() {
+  const [syncState, setSyncState] = useState<{ isSyncing: boolean; lastSavedAt?: number }>({ isSyncing: false });
+  const [showSaved, setShowSaved] = useState(false);
+
+  useEffect(() => {
+    return subscribeToSyncStatus((isSyncing, lastSavedAt) => {
+      setSyncState({ isSyncing, lastSavedAt });
+      if (!isSyncing && lastSavedAt) {
+        setShowSaved(true);
+        const t = setTimeout(() => setShowSaved(false), 2200);
+        return () => clearTimeout(t);
+      }
+    });
+  }, []);
+
+  if (!syncState.isSyncing && !showSaved) return null;
+
+  return (
+    <div className={`topbar-sync-indicator ${syncState.isSyncing ? 'syncing' : 'saved'}`}>
+      {syncState.isSyncing ? (
+        <>
+          <Spinner size={13} />
+          <span>Saving to cloud…</span>
+        </>
+      ) : (
+        <>
+          <Icon name="check" />
+          <span>Cloud updated</span>
+        </>
+      )}
+    </div>
+  );
 }
 
 function Icon({ name }: { name: 'sun' | 'moon' | 'chart' | 'search' | 'gear' | 'plus' | 'check' | 'arrow' | 'download' | 'upload' | 'book' | 'user' | 'logout' | 'calendar' | 'edit' | 'trash' }) {
@@ -28,8 +81,13 @@ function Icon({ name }: { name: 'sun' | 'moon' | 'chart' | 'search' | 'gear' | '
   return <svg className="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={paths[name]} /></svg>;
 }
 
-function Button({ children, variant = 'secondary', onClick, type = 'button', disabled = false, className = '' }: { children: React.ReactNode; variant?: 'primary' | 'secondary' | 'quiet' | 'danger'; onClick?: () => void; type?: 'button' | 'submit'; disabled?: boolean; className?: string }) {
-  return <button className={`button button-${variant} ${className}`} type={type} onClick={onClick} disabled={disabled}>{children}</button>;
+function Button({ children, variant = 'secondary', onClick, type = 'button', disabled = false, loading = false, className = '' }: { children: React.ReactNode; variant?: 'primary' | 'secondary' | 'quiet' | 'danger'; onClick?: () => void; type?: 'button' | 'submit'; disabled?: boolean; loading?: boolean; className?: string }) {
+  return (
+    <button className={`button button-${variant} ${loading ? 'is-loading' : ''} ${className}`} type={type} onClick={onClick} disabled={disabled || loading}>
+      {loading ? <Spinner /> : null}
+      {children}
+    </button>
+  );
 }
 
 function ProgressRing({ value, completed, total }: { value: number; completed: number; total: number }) {
@@ -48,11 +106,19 @@ function ProgressRing({ value, completed, total }: { value: number; completed: n
   </svg><div className="progress-center"><strong>{completed}</strong><span>of {total || 0} ({pct}%)</span></div></div>;
 }
 
-function RevisionRow({ revision, topic, timezone, onComplete }: { revision: Revision; topic?: Topic; timezone: string; onComplete: (id: string) => void }) {
+function RevisionRow({ revision, topic, timezone, onComplete }: { revision: Revision; topic?: Topic; timezone: string; onComplete: (id: string) => Promise<void> | void }) {
+  const [loading, setLoading] = useState(false);
+  const handleComplete = async () => {
+    setLoading(true);
+    await onComplete(revision.id);
+    setLoading(false);
+  };
   return <div className="revision-row" tabIndex={0}>
     <div className="revision-marker">{revision.sequence}</div>
     <div className="revision-info"><div className="eyebrow">{topic?.subject} <span>·</span> Day {revision.offsetDays}</div><h3>{topic?.title}</h3><p>Due {formatDate(localDateKey(new Date(revision.dueAt), timezone))}</p></div>
-    <Button variant="secondary" onClick={() => onComplete(revision.id)}><Icon name="check" /> Complete</Button>
+    <Button variant="secondary" loading={loading} onClick={handleComplete}>
+      {loading ? 'Saving…' : <><Icon name="check" /> Complete</>}
+    </Button>
   </div>;
 }
 
@@ -154,6 +220,7 @@ function AddStudyDialog({ onClose }: { onClose: () => void }) {
   const [title, setTitle] = useState('');
   const [startDate, setStartDate] = useState(() => localDateKey(new Date(), data.settings.timezone));
   const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
   const focusRef = useRef<HTMLInputElement | HTMLSelectElement>(null);
 
   useEffect(() => {
@@ -167,8 +234,10 @@ function AddStudyDialog({ onClose }: { onClose: () => void }) {
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
-    if (!valid) return;
+    if (!valid || saving) return;
+    setSaving(true);
     await store.addTopic(subject, title, startDate);
+    setSaving(false);
     setSaved(true);
     setTimeout(onClose, 350);
   }
@@ -183,7 +252,7 @@ function AddStudyDialog({ onClose }: { onClose: () => void }) {
 
   return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="modal" role="dialog" aria-modal="true" aria-labelledby="add-study-title">
     <div className="modal-heading"><div><span className="eyebrow">New study</span><h2 id="add-study-title">Keep something worth remembering</h2></div><button className="close-button" onClick={onClose} aria-label="Close dialog">×</button></div>
-    <form onSubmit={submit}><label>Subject<select ref={subjectChoice !== newSubjectValue ? (focusRef as any) : undefined} value={subjectChoice} onChange={(event) => { const value = event.target.value; setSubjectChoice(value); setSubject(value === newSubjectValue ? '' : value); }} aria-label="Choose a saved subject"><option value={newSubjectValue}>＋ Create a new subject</option>{data.subjects.map((savedSubject) => <option key={savedSubject} value={savedSubject}>{savedSubject}</option>)}</select></label>{subjectChoice === newSubjectValue && <label>New subject<input ref={focusRef as any} value={subject} onChange={handleSubjectChange} placeholder="e.g. Biology, Spanish, Product design" maxLength={120} /></label>}<label>Title<input ref={subjectChoice !== newSubjectValue ? (focusRef as any) : undefined} value={title} onChange={handleTitleChange} placeholder="What do you want to retain?" maxLength={240} /></label><label>Start date (DD/MM/YY)<CustomDateInput valueKey={startDate} onChangeKey={setStartDate} /></label><p className="form-hint">Saved subjects are kept for quick selection. Six quiet check-ins will appear on days 3, 5, 7, 12, 20, and 30 relative to your start date.</p><div className="modal-actions"><Button variant="quiet" onClick={onClose}>Cancel</Button><Button variant="primary" type="submit" disabled={!valid}>{saved ? 'Saved' : 'Add study'} <Icon name="arrow" /></Button></div></form>
+    <form onSubmit={submit}><label>Subject<select ref={subjectChoice !== newSubjectValue ? (focusRef as any) : undefined} value={subjectChoice} onChange={(event) => { const value = event.target.value; setSubjectChoice(value); setSubject(value === newSubjectValue ? '' : value); }} aria-label="Choose a saved subject"><option value={newSubjectValue}>＋ Create a new subject</option>{data.subjects.map((savedSubject) => <option key={savedSubject} value={savedSubject}>{savedSubject}</option>)}</select></label>{subjectChoice === newSubjectValue && <label>New subject<input ref={focusRef as any} value={subject} onChange={handleSubjectChange} placeholder="e.g. Biology, Spanish, Product design" maxLength={120} /></label>}<label>Title<input ref={subjectChoice !== newSubjectValue ? (focusRef as any) : undefined} value={title} onChange={handleTitleChange} placeholder="What do you want to retain?" maxLength={240} /></label><label>Start date (DD/MM/YY)<CustomDateInput valueKey={startDate} onChangeKey={setStartDate} /></label><p className="form-hint">Saved subjects are kept for quick selection. Six quiet check-ins will appear on days 3, 5, 7, 12, 20, and 30 relative to your start date.</p><div className="modal-actions"><Button variant="quiet" onClick={onClose}>Cancel</Button><Button variant="primary" type="submit" disabled={!valid || saving} loading={saving}>{saved ? 'Saved' : saving ? 'Saving…' : 'Add study'} {!saving && <Icon name="arrow" />}</Button></div></form>
   </div></div>;
 }
 
@@ -199,6 +268,7 @@ function EditStudyDialog({ topic, onClose }: { topic: Topic; onClose: () => void
   };
   const [startDate, setStartDate] = useState(() => getInitialDate(topic.createdAt));
   const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
   const valid = subject.trim().length > 0 && subject.trim().length <= 120 && title.trim().length > 0 && title.trim().length <= 240;
 
   useEffect(() => {
@@ -209,8 +279,10 @@ function EditStudyDialog({ topic, onClose }: { topic: Topic; onClose: () => void
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
-    if (!valid) return;
+    if (!valid || saving) return;
+    setSaving(true);
     await store.updateTopic(topic.id, subject, title, startDate);
+    setSaving(false);
     setSaved(true);
     setTimeout(onClose, 350);
   }
@@ -235,7 +307,7 @@ function EditStudyDialog({ topic, onClose }: { topic: Topic; onClose: () => void
           <p className="form-hint">Updating the start date will recalculate all 6 check-in due dates relative to the new date.</p>
           <div className="modal-actions">
             <Button variant="quiet" onClick={onClose}>Cancel</Button>
-            <Button variant="primary" type="submit" disabled={!valid}>{saved ? 'Saved' : 'Save changes'} <Icon name="arrow" /></Button>
+            <Button variant="primary" type="submit" disabled={!valid || saving} loading={saving}>{saved ? 'Saved' : saving ? 'Saving…' : 'Save changes'} {!saving && <Icon name="arrow" />}</Button>
           </div>
         </form>
       </div>
@@ -434,7 +506,7 @@ function RetainApp() {
   useEffect(() => { void store.hydrateFromApi(); }, []);
   useEffect(() => { document.documentElement.dataset.theme = data.settings.theme === 'system' ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : data.settings.theme; document.documentElement.dataset.motion = data.settings.animationsEnabled ? 'on' : 'off'; }, [data.settings.theme, data.settings.animationsEnabled]);
   useEffect(() => { const handler = (event: KeyboardEvent) => { if ((event.target as HTMLElement).matches('input, textarea, select')) return; if (event.key.toLowerCase() === 'n') { event.preventDefault(); setAddOpen(true); } if (event.key === '/') { event.preventDefault(); setPage('search'); } if (event.key === 'Escape') { setAddOpen(false); setEditingTopic(null); } }; window.addEventListener('keydown', handler); return () => window.removeEventListener('keydown', handler); }, []);
-  return <div className="app-shell"><a href="#main" className="skip-link">Skip to content</a><nav className="topbar"><button className="brand" onClick={() => setPage('dashboard')} aria-label="Go to Today"><span className="brand-mark">r</span><span>retain</span></button><div className="nav-links">{([['dashboard', 'Today', 'sun'], ['statistics', 'Statistics', 'chart'], ['search', 'Search', 'search'], ['settings', 'Settings', 'gear']] as const).map(([key, label, icon]) => <button key={key} className={page === key ? 'active' : ''} onClick={() => setPage(key)} aria-label={label}><Icon name={icon} />{label}</button>)}</div>{authEnabled && <div className="user-profile-badge" title={user?.email || 'Signed in'}><span className="user-avatar"><Icon name="user" /></span><span className="user-email">{user?.email || 'Account'}</span><button className="logout-button" onClick={logout} title="Sign out" aria-label="Sign out"><Icon name="logout" /></button></div>}<button className="theme-toggle-btn" onClick={() => { const nextTheme = data.settings.theme === 'dark' ? 'light' : 'dark'; void store.updateSettings({ theme: nextTheme }); }} title={`Switch to ${data.settings.theme === 'dark' ? 'light' : 'dark'} mode`} aria-label="Toggle theme"><Icon name={data.settings.theme === 'dark' ? 'sun' : 'moon'} /></button><button className="mobile-add" onClick={() => setAddOpen(true)} aria-label="Add study"><Icon name="plus" /></button></nav><main id="main" className="main-content">{page === 'dashboard' && <Dashboard onAdd={() => setAddOpen(true)} onEditTopic={(topic) => setEditingTopic(topic)} />}{page === 'statistics' && <StatisticsPage />}{page === 'search' && <SearchPage onEditTopic={(topic) => setEditingTopic(topic)} />}{page === 'settings' && <SettingsPage />}</main>{addOpen && <AddStudyDialog onClose={() => setAddOpen(false)} />}{editingTopic && <EditStudyDialog topic={editingTopic} onClose={() => setEditingTopic(null)} />}<footer className="footer">Retain <span>·</span> quiet progress, remembered <small>v1.0</small></footer></div>;
+  return <div className="app-shell"><a href="#main" className="skip-link">Skip to content</a><nav className="topbar"><button className="brand" onClick={() => setPage('dashboard')} aria-label="Go to Today"><span className="brand-mark">r</span><span>retain</span></button><div className="nav-links">{([['dashboard', 'Today', 'sun'], ['statistics', 'Statistics', 'chart'], ['search', 'Search', 'search'], ['settings', 'Settings', 'gear']] as const).map(([key, label, icon]) => <button key={key} className={page === key ? 'active' : ''} onClick={() => setPage(key)} aria-label={label}><Icon name={icon} />{label}</button>)}</div><TopbarSyncIndicator />{authEnabled && <div className="user-profile-badge" title={user?.email || 'Signed in'}><span className="user-avatar"><Icon name="user" /></span><span className="user-email">{user?.email || 'Account'}</span><button className="logout-button" onClick={logout} title="Sign out" aria-label="Sign out"><Icon name="logout" /></button></div>}<button className="theme-toggle-btn" onClick={() => { const nextTheme = data.settings.theme === 'dark' ? 'light' : 'dark'; void store.updateSettings({ theme: nextTheme }); }} title={`Switch to ${data.settings.theme === 'dark' ? 'light' : 'dark'} mode`} aria-label="Toggle theme"><Icon name={data.settings.theme === 'dark' ? 'sun' : 'moon'} /></button><button className="mobile-add" onClick={() => setAddOpen(true)} aria-label="Add study"><Icon name="plus" /></button></nav><main id="main" className="main-content">{page === 'dashboard' && <Dashboard onAdd={() => setAddOpen(true)} onEditTopic={(topic) => setEditingTopic(topic)} />}{page === 'statistics' && <StatisticsPage />}{page === 'search' && <SearchPage onEditTopic={(topic) => setEditingTopic(topic)} />}{page === 'settings' && <SettingsPage />}</main>{addOpen && <AddStudyDialog onClose={() => setAddOpen(false)} />}{editingTopic && <EditStudyDialog topic={editingTopic} onClose={() => setEditingTopic(null)} />}<footer className="footer">Retain <span>·</span> quiet progress, remembered <small>v1.0</small></footer></div>;
 }
 
 function LoginScreen({ onAuthenticated }: { onAuthenticated: () => void }) {
