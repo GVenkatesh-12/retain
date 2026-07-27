@@ -1,4 +1,4 @@
-const apiMode = (import.meta.env.VITE_API_MODE as string | undefined) === 'server';
+const apiMode = import.meta.env.PROD || (import.meta.env.VITE_API_MODE as string | undefined) === 'server';
 
 export const apiEnabled = apiMode;
 
