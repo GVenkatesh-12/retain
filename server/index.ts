@@ -49,7 +49,22 @@ async function loadData(id: string): Promise<AppData> {
   return { settings, subjects: [...new Set(topics.map((topic) => topic.subject))], topics, revisions, completionEvents, bonusBatches: batches };
 }
 
-app.use('*', async (_c, next) => { await migrate(); await next(); });
+app.use('*', async (c, next) => {
+  await migrate();
+  const path = c.req.path;
+  if (path === '/api/auth/login' || path === '/api/health' || path === '/auth/login' || path === '/health') return next();
+  const authHeader = getHeader(c, 'authorization');
+  if (authHeader.startsWith('Bearer ')) {
+    const token = authHeader.slice(7).trim();
+    const match = token.match(/^retain-session-(.+?)-\d+$/);
+    if (match && match[1]) {
+      c.set('retainUserId', match[1]);
+      return next();
+    }
+  }
+  c.set('retainUserId', installationUser);
+  return next();
+});
 
 app.get('/api/health', async (c) => { await query('SELECT 1 AS ok'); return json(c, { status: 'ok', database: 'connected' }); });
 
@@ -81,12 +96,6 @@ app.post('/api/auth/login', async (c) => {
     user: { id: uid, email: rowString(user, 'email') },
     token: `retain-session-${uid}-${Date.now()}`,
   });
-});
-
-app.use('/api/*', async (c, next) => {
-  if (c.req.path === '/api/auth/login' || c.req.path === '/api/health') return next();
-  c.set('retainUserId', installationUser);
-  return next();
 });
 
 app.get('/api/settings', async (c) => json(c, await ensureSettings(userId(c))));
@@ -136,7 +145,7 @@ async function saveIdempotency(key: string, uid: string, statusCode: number, bod
 
 app.post('/api/topics', async (c) => {
   const uid = userId(c);
-  const idempotencyKey = getHeader(c, 'idempotency-key') || getHeader(c, 'x-idempotency-key');
+  const idempotencyKey = getHeader(c, 'idempotency-key');
   if (idempotencyKey) {
     const cached = await checkIdempotency(c, idempotencyKey, uid);
     if (cached) return cached;
@@ -147,7 +156,9 @@ app.post('/api/topics', async (c) => {
   const settings = await ensureSettings(uid);
   const rawDate = stringValue(body?.createdAt) || stringValue(body?.startDate);
   const createdAt = rawDate ? (/^\d{4}-\d{2}-\d{2}$/.test(rawDate) ? dateKeyToInstant(rawDate, settings.timezone) : new Date(rawDate).toISOString()) : nowIso();
-  const id = randomUUID(); const topic: Topic = { id, userId: uid, subject, title, createdAt, archivedAt: null }; const revisions = scheduleForTopic(topic, settings.timezone);
+  const id = stringValue(body?.id) || randomUUID();
+  const topic: Topic = { id, userId: uid, subject, title, createdAt, archivedAt: null };
+  const revisions = scheduleForTopic(topic, settings.timezone);
   await transaction([{ sql: 'INSERT INTO topics (id, user_id, subject, title, created_at) VALUES (:id, :user_id, :subject, :title, :created_at)', args: { id, user_id: topic.userId, subject, title, created_at: createdAt } }, ...revisions.map((revision) => ({ sql: 'INSERT INTO revisions (id, topic_id, user_id, sequence, offset_days, due_at, kind, status, created_at) VALUES (:id, :topic_id, :user_id, :sequence, :offset_days, :due_at, :kind, :status, :created_at)', args: { id: revision.id, topic_id: id, user_id: topic.userId, sequence: revision.sequence, offset_days: revision.offsetDays, due_at: revision.dueAt, kind: revision.kind, status: revision.status, created_at: createdAt } }))]);
   const resData = { topic, revisions };
   if (idempotencyKey) await saveIdempotency(idempotencyKey, uid, 201, resData);

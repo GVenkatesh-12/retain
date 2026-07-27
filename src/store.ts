@@ -56,7 +56,7 @@ export const store = {
     persist();
 
     if (apiEnabled) {
-      const response = await apiRequest('/api/topics', { method: 'POST', body: JSON.stringify({ subject: s, title: t, startDate, createdAt }) });
+      const response = await apiRequest('/api/topics', { method: 'POST', body: JSON.stringify({ id: topic.id, subject: s, title: t, startDate, createdAt }) });
       if (response.ok) {
         await store.hydrateFromApi();
       }

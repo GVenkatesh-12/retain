@@ -522,6 +522,7 @@ function LoginScreen({ onAuthenticated }: { onAuthenticated: () => void }) {
     const res = await loginWithPassword(email, password);
     setBusy(false);
     if (res.ok) {
+      await store.hydrateFromApi();
       onAuthenticated();
     } else {
       setError(res.message || 'Invalid email or password.');
