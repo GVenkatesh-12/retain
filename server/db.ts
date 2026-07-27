@@ -1,6 +1,19 @@
 import { createClient, type Client, type InStatement, type Row } from '@libsql/client';
+import { readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
+
+try {
+  const envContent = readFileSync('.env.local', 'utf8');
+  for (const line of envContent.split('\n')) {
+    const idx = line.indexOf('=');
+    if (idx > 0) {
+      const k = line.slice(0, idx).trim();
+      const v = line.slice(idx + 1).trim();
+      if (k && !process.env[k]) process.env[k] = v;
+    }
+  }
+} catch {}
 
 const schemaUrl = new URL('./schema.sql', import.meta.url);
 const localUrl = process.env.TURSO_DATABASE_URL || 'file:./retain.db';

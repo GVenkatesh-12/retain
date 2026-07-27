@@ -4,7 +4,7 @@ import { apiEnabled, apiRequest } from './api';
 import type { AppData, BonusBatch, CompletionEvent, Revision, Settings, Topic } from './types';
 
 const STORAGE_KEY = 'retain-data-v1';
-const USER_ID = 'local-user';
+const USER_ID = 'user-gvenkatesh';
 
 const nowIso = () => new Date().toISOString();
 const makeId = (prefix: string) => `${prefix}-${crypto.randomUUID()}`;
