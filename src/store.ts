@@ -196,10 +196,16 @@ export const store = {
   },
   async hydrateFromApi() {
     if (!apiEnabled) return;
-    const response = await apiRequest('/api/export');
-    if (!response.ok) return;
-    const result = await response.json() as { data?: AppData };
-    if (result.data) { state = result.data; persist(); }
+    try {
+      const response = await apiRequest('/api/export');
+      if (!response.ok) return;
+      const contentType = response.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) return;
+      const result = await response.json() as { data?: AppData };
+      if (result.data) { state = result.data; persist(); }
+    } catch (err) {
+      console.error('hydrateFromApi error:', err);
+    }
   },
 };
 
